@@ -86,7 +86,7 @@ acg_lit_rpl <- gsub("text\n", "@Title: ", acg_lit_rpl)
 acg_lit_rpl <- gsub("sequen\n", "@Title: ", acg_lit_rpl)
 acg_lit_rpl <- gsub("]\n", "@Title: ", acg_lit_rpl)
 
-head(acg_lit_split, 1000)
+head(acg_lit_split$x, 1000)
 
 # split into rows using @ delimiter
 acg_lit_split <- as.data.frame(strsplit(acg_lit_rpl, "@"), stringsAsFactors = FALSE)
@@ -148,5 +148,98 @@ table(country)
 
 str(acg_lit_split)
 library(dplyr)
+acg_lit_split$varnum <- 0
 acg_lit_split <- acg_lit_split %>% 
-  mutate(varnum = if())
+  mutate(varnum = ifelse(grep("Title", acg_lit_split$x), 1, 
+                  ifelse(grep("Published", acg_lit_split$x), 2,
+                  ifelse(grep("Authors", acg_lit_split$x), 3,
+                  ifelse(grep("Country", acg_lit_split$x), 4,
+                  ifelse(grep("Journal", acg_lit_split$x), 5,
+                  ifelse(grep("URL", acg_lit_split$x), 6)))))))
+
+str(acg_lit_split)
+acg_lit_split$varnum <- 0
+acg_lit_split$varnum <- ifelse(grep("Title", acg_lit_split$x), 1)
+
+##-------------------------------------------------------
+## create varnum for loop
+##----------------------------------------------------
+
+acg_lit_split[ grep("Title", acg_lit_split$x), ]$varnum <- 1
+acg_lit_split[ grep("Published", acg_lit_split$x), ]$varnum <- 2
+acg_lit_split[ grep("Authors", acg_lit_split$x), ]$varnum <- 3
+acg_lit_split[ grep("Country", acg_lit_split$x), ]$varnum <- 4
+acg_lit_split[ grep("Journal", acg_lit_split$x), ]$varnum <- 5
+acg_lit_split[ grep("URL", acg_lit_split$x), ]$varnum <- 6
+
+##-----------------------------------------------------
+## citation loop for matrix of missingness
+##--------------------------------------------------
+
+# create variables: citenum, varnum, con, prev_con
+citenum <- 0
+varnum <- acg_lit_split$varnum
+con <- (citenum *10) + varnum
+prev_con <- 99
+
+# create dataframe
+citation <- as.data.frame(cbind(prev_con, con, citenum, varnum))
+head(citation, 20)
+
+# use shift function from data.table for prev_con
+library(data.table)
+citationDT <- as.data.table(citation)
+citationDT <- citationDT[, prev_con := shift(con)]
+
+# clean up data for citenum loop
+citation <- as.data.frame(citationDT)
+citation[1,1] <- 99
+
+citation <- subset(citation, varnum == 1 | varnum == 2 | varnum == 3 | varnum == 4 | varnum == 5)
+str(citation)
+
+# citenum loop
+for (i in 1:nrow(citation)){
+  if (citation$con[i] <= citation$prev_con[i]) {
+    if (i==1) citation$citenum[i] <- 1
+    else citation$citenum[i] <- citation$citenum[i-1] + 1
+  } 
+  else {
+    citation$citenum[i] <- citation$citenum[i-1]
+  }
+}
+
+##----------------------------------------------------
+## create dataframe of citations by varnum
+##---------------------------------------------------
+
+# limit citations to citenum and varnum
+citlimit <- citation[ , c(3,4)]
+head(citlimit, 20)
+
+# create vectors 
+titnum <- subset(citlimit, varnum == 1); names(titnum) <- c("citenum", "title") 
+pubnum <- subset(citlimit, varnum == 2); names(pubnum) <- c("citenum", "publish")  
+authnum <- subset(citlimit, varnum == 3); names(authnum) <- c("citenum", "author")  
+counum <- subset(citlimit, varnum == 4); names(counum) <- c("citenum", "country") 
+jounum <- subset(citlimit, varnum == 5); names(jounum) <- c("citenum", "journal")  
+
+head(titnum, 30)
+
+# create master key for join
+citenum_master <- as.data.frame(unique(citation$citenum))
+names(citenum_master) <- "citenum"
+str(citenum_master)
+
+# create a dataframe
+library(dplyr)
+missing <- left_join(citenum_master, titnum, by="citenum")
+missing <- left_join(missing, pubnum, by="citenum")
+missing <- left_join(missing, authnum, by="citenum")
+missing <- left_join(missing, counum, by="citenum")
+missing <- left_join(missing, jounum, by="citenum")
+
+head(missing, 200)
+
+# sum the number of missing values
+sapply(missing, function(x) sum(is.na(x)))
